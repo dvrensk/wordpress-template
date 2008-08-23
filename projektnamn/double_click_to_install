@@ -1,11 +1,185 @@
 #! /usr/bin/ruby
 
 require 'fileutils'
+require 'pathname'
 
-File.cd File.dirname(__FILE__)
+class WpProjectInstaller
+  attr_accessor :hostname, :username
+  
+  def initialize
+    self.hostname = `hostname`.chomp
+    self.username = `whoami`.chomp
+  end
+  
+  def install
+    directory = File.dirname(__FILE__)
+    FileUtils.cd directory
 
-if File.directory?(".git")
-  puts "Du har redan installerat det här WP-projektet"
-  exit
+    if File.directory?(".git")
+      puts "Du har redan installerat det här WP-projektet"
+      return false
+    end
+
+    if directory.include?(' ')
+      puts "Kan inte installera projektet, för sökvägen innehåller mellanslag:"
+      puts directory
+      puts directory.tr(' ','^').tr('^^',' ')
+      return false
+    end
+
+    dirname = File.basename(FileUtils.pwd)
+    if dirname == "projektnamn"
+      puts "Byt namn på den här katalogen till vad du vill att projektet ska heta"
+      puts "och försök sedan installera igen."
+      return false
+    end
+  
+    default_project_name = dirname.downcase.gsub(/[^-a-z0-9]/,'')
+    puts "Först ska du välja vad du vill ha för webbadress till projektet.  Ditt"
+    puts "datornamn kommer att läggas till på slutet, så om du väljer 'kaffe'"
+    puts "blir det 'kaffe.#{hostname}'."
+    puts "Namnet får innehålla a-z, 0-9 och -"
+    print "Adress före punkt [#{default_project_name}]: "
+    virtual = $stdin.gets.strip
+    if virtual.empty?
+      virtual = default_project_name
+    end
+
+    unless virtual =~ /^[-a-z0-9]+$/
+      puts "hostnamnet '#{virtual}' innehåller konstiga tecken"
+      return false
+    end
+    puts "'#{virtual}'"
+    exit
+
+    # if OK
+    # apache vhost, File.join(directory, "wordpress")
+    # create_database mysql, db, db_user
+
+    File.open("wordpress/wp-config.php", "w") { |f| write_wp_config(f, db, db_user, 'Localhost') }
+    File.open("config/wp-config.php", "w")    { |f| write_wp_config(f, 'db_name', 'db_user', 'db_host') }
+
+    FileUtils.mkdir "wordpress/wp-content/uploads", :mode => 0777
+    FileUtils.cp "config/dot_htaccess", "wordpress/.htaccess"
+
+    system "git init; git add .; git commit -m Initial"
+  end
+
+  # =============
+  # = WP-config =
+  # =============
+
+  def write_wp_config (file, db_name, db_user, db_host)
+    keys = (1..3).inject([]) do |n|
+      rand(345678765434567876545678765434567873567897545909644587456876456887345876534587645987345679873568).to_s(36)
+    end
+    file.puts <<-EOT.gsub(/^\s+/,'')
+    <?php
+    // ** MySQL settings ** //
+    define('DB_NAME',     '#{db_name}');    // The name of the database
+    define('DB_USER',     '#{db_user}');    // Your MySQL username
+    define('DB_PASSWORD', '');              // ...and password
+    define('DB_HOST',     '#{db_host}');    // 99% chance you won't need to change this value
+    define('DB_CHARSET',  'utf8');
+    define('DB_COLLATE',  'utf8_swedish_ci');
+
+    // Secret keys for safe cookies
+    define('AUTH_KEY', '#{keys[0]}');
+    define('SECURE_AUTH_KEY', '#{keys[1]}');
+    define('LOGGED_IN_KEY', '#{keys[2]}');
+
+    // You can have multiple installations in one database if you give each a unique prefix
+    $table_prefix  = 'wp_';   // Only numbers, letters, and underscores please!
+
+    // Change this to localize WordPress.  A corresponding MO file for the
+    // chosen language must be installed to wp-content/languages.
+    // For example, install de.mo to wp-content/languages and set WPLANG to 'de'
+    // to enable German language support.
+    define ('WPLANG', 'sv_SE');
+
+    /* That's all, stop editing! Happy blogging. */
+
+    if ( !defined('ABSPATH') )
+    	define('ABSPATH', dirname(__FILE__) . '/');
+    require_once(ABSPATH . 'wp-settings.php');
+    ?>
+    EOT
+  end
+
+  # ==========
+  # = Apache =
+  # ==========
+
+  def add_apache_vhost (vhost, path)
+    conf_file = "/etc/apache2/users/#{USERNAME}.conf"
+    system "sudo chmod 666 #{conf_file}"
+    File.open conf_file, "a" do |f|
+      str = <<-EOT
+
+      <VirtualHost *:80 *:8000>
+          ServerAdmin webmaster.#{vhost.sub(/\..+/,'')}@#{HOSTNAME}
+          DocumentRoot #{path}
+          ServerAlias #{vhost}
+      </VirtualHost>
+      EOT
+      f.puts str
+    end
+    system "sudo chmod 644 #{conf_file}"
+  end
+
+  def add_hosts_entry (vhost)
+    hosts_file = "/etc/hosts"
+    system "sudo chmod 666 #{hosts_file}"
+    File.open hosts_file, "a" do |f|
+      f.puts "127.0.0.1 #{vhost}"
+    end
+    system "sudo chmod 644 #{hosts_file}"
+  end
+
+  def apache (vhost, path)
+    add_apache_vhost vhost, path
+    add_hosts_entry  vhost
+    system "sudo apachectl -k graceful"
+  end
+
+  # =========
+  # = MySQL =
+  # =========
+
+  def check_databases (mysql, name)
+    pipe = IO.popen mysql, "r+"
+    pipe.puts "show databases"
+    pipe.close_write
+    pipe.gets # Skip "Databases\n"
+    if pipe.readlines.map { |e| e.chomp }.detect { |e| e == name }
+      raise "Det finns redan en databas som heter #{name}!"
+    end
+    pipe.close
+  end
+
+  def get_mysql_command
+    print "Root-lösenord för MySQL: "
+    `stty -echo`
+    root_pass = $stdin.gets.chomp
+    puts ""
+    `stty echo`
+    root_pass = " -p#{root_pass}" unless root_pass.empty?
+    "mysql -uroot#{root_pass}"
+  end
+
+  def create_database (mysql, db_name, db_user)
+    charset = "utf8"
+    IO.popen mysql, "w" do |pipe|
+      # create database foo default character set utf8 default collate utf8_swedish_ci;
+      pipe.puts "create database #{db_name} default character set #{charset} default collate #{charset}_swedish_ci;"
+      # grant all on foo.* to foo@'localhost' identified by '';
+      pipe.puts "grant all on #{db_name}.* to #{db_user}@'localhost' identified by '';"
+    end
+  end
 end
 
+# ================================
+# = Run main when double-clicked =
+# ================================
+
+WpProjectInstaller.new.install if $0 == __FILE__
