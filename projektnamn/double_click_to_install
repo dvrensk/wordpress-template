@@ -49,9 +49,11 @@ class WpProjectInstaller
       puts "hostnamnet '#{virtual}' innehåller konstiga tecken"
       return false
     end
-    puts "'#{virtual}'"
-    exit
 
+    mysql = get_mysql_command
+    existing_databases = mysql_databases(mysql)
+    puts existing_databases.join(",")
+    exit
     # if OK
     # apache vhost, File.join(directory, "wordpress")
     # create_database mysql, db, db_user
@@ -146,15 +148,14 @@ class WpProjectInstaller
   # = MySQL =
   # =========
 
-  def check_databases (mysql, name)
+  def mysql_databases (mysql)
     pipe = IO.popen mysql, "r+"
     pipe.puts "show databases"
     pipe.close_write
     pipe.gets # Skip "Databases\n"
-    if pipe.readlines.map { |e| e.chomp }.detect { |e| e == name }
-      raise "Det finns redan en databas som heter #{name}!"
-    end
+    list = pipe.readlines.map { |e| e.chomp }
     pipe.close
+    list
   end
 
   def get_mysql_command

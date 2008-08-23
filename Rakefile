@@ -6,10 +6,10 @@ end
 
 task :clean do
   FileUtils.rm_rf "build"
-  FileUtils.rm_f "projektnamn/config/wp-config.php", "projektnamn/wordpress/wp-config.php"
+  FileUtils.rm_f ["projektnamn/config/wp-config.php", "projektnamn/wordpress/wp-config.php"]
 end
 
-rake :test => [:clean] do
+task :test => [:clean] do
   FileUtils.mkdir_p "build"
   system "git archive --format=tar --prefix=projektnamn/ HEAD:projektnamn/ | (cd build; tar xf -)"
 end
