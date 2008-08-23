@@ -54,11 +54,12 @@ class WpProjectInstaller
       return false
     end
     if existing_databases.include?(db)
-      puts "Det finns redan en database med namnet '#{db}'!"
+      puts "Det finns redan en databas med namnet '#{db}'!"
       return false
     end
 
     # if OK
+    puts "Ange ditt vanliga lösenord på den här datorn för att uppdatera systemfiler:"
     apache "#{virtual}.#{hostname}", File.join(FileUtils.pwd, "wordpress")
     create_database mysql, db
 
@@ -69,6 +70,12 @@ class WpProjectInstaller
     FileUtils.cp "config/dot_htaccess", "wordpress/.htaccess"
 
     system "git init; git add .; git commit -q -m Initial"
+    
+    puts ""
+    puts "Du är nu klar med inställningarna.  Installera WP genom att öppna"
+    puts "    http://#{virtual}.#{hostname}/"
+    puts "i din webbläsare."
+    system "open http://#{virtual}.#{hostname}/"
   end
 
   # =============
@@ -212,6 +219,7 @@ end
 
 if $0 == __FILE__
   WpProjectInstaller.new.install
-  print "Tryck retur för att stänga fönstret: "
+  puts ""
+  print "Tryck retur för att stänga fönstret. "
   $stdin.gets
 end
