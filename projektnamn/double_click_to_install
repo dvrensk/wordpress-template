@@ -67,7 +67,7 @@ class WpProjectInstaller
     FileUtils.mkdir "wordpress/wp-content/uploads", :mode => 0777
     FileUtils.cp "config/dot_htaccess", "wordpress/.htaccess"
 
-    system "git init; git add .; git commit -m Initial"
+    system "git init; git add .; git commit -q -m Initial"
   end
 
   # =============
@@ -75,7 +75,7 @@ class WpProjectInstaller
   # =============
 
   def write_wp_config (file, db_name, db_user, db_host)
-    keys = (1..3).inject([]) do |n|
+    keys = (1..3).map do |n|
       rand(345678765434567876545678765434567873567897545909644587456876456887345876534587645987345679873568).to_s(36)
     end
     file.puts <<-EOT.gsub(/^\s+/,'')
