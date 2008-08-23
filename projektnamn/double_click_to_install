@@ -33,20 +33,16 @@ class WpProjectInstaller
       puts "och försök sedan installera igen."
       return false
     end
-  
-    default_project_name = dirname.downcase.gsub(/[^-a-z0-9]/,'')
-    puts "Först ska du välja vad du vill ha för webbadress till projektet.  Ditt"
-    puts "datornamn kommer att läggas till på slutet, så om du väljer 'kaffe'"
-    puts "blir det 'kaffe.#{hostname}'."
-    puts "Namnet får innehålla a-z, 0-9 och -"
-    print "Adress före punkt [#{default_project_name}]: "
-    virtual = $stdin.gets.strip
-    if virtual.empty?
-      virtual = default_project_name
+
+    virtual = pick_virtual_name(File.basename(FileUtils.pwd).downcase.gsub(/[^-a-z0-9]/,''))
+    unless virtual =~ /^[a-z][-a-z0-9]+$/
+      puts "hostnamnet '#{virtual}' innehåller konstiga tecken"
+      return false
     end
 
-    unless virtual =~ /^[-a-z0-9]+$/
-      puts "hostnamnet '#{virtual}' innehåller konstiga tecken"
+    db = pick_db_name(virtual.tr('-','_'))
+    unless db =~ /^[a-z][_a-z0-9]+$/
+      puts "databasnamnet '#{db}' innehåller konstiga tecken"
       return false
     end
 
@@ -56,13 +52,16 @@ class WpProjectInstaller
       puts "Kan inte prata med MySQL"
       return false
     end
-    puts existing_databases.join(",")
-    exit
-    # if OK
-    # apache vhost, File.join(directory, "wordpress")
-    # create_database mysql, db, db_user
+    if existing_databases.include?(db)
+      puts "Det finns redan en database med namnet '#{db}'!"
+      return false
+    end
 
-    File.open("wordpress/wp-config.php", "w") { |f| write_wp_config(f, db, db_user, 'Localhost') }
+    # if OK
+    # apache "#{virtual}.#{hostname}", File.join(FileUtils.pwd, "wordpress")
+    # create_database mysql, db
+
+    File.open("wordpress/wp-config.php", "w") { |f| write_wp_config(f, db, db, 'Localhost') }
     File.open("config/wp-config.php", "w")    { |f| write_wp_config(f, 'db_name', 'db_user', 'db_host') }
 
     FileUtils.mkdir "wordpress/wp-content/uploads", :mode => 0777
@@ -116,6 +115,17 @@ class WpProjectInstaller
   # = Apache =
   # ==========
 
+  def pick_virtual_name (default)
+    puts "Först ska du välja vad du vill ha för webbadress till projektet.  Ditt"
+    puts "datornamn kommer att läggas till på slutet, så om du väljer 'kaffe'"
+    puts "blir det 'kaffe.#{hostname}'."
+    puts "Namnet får innehålla a-z, 0-9 och -"
+    print "Adress före punkt [#{default}]: "
+    name = $stdin.gets.strip
+    name = default if name.empty?
+    name
+  end
+  
   def add_apache_vhost (vhost, path)
     conf_file = "/etc/apache2/users/#{USERNAME}.conf"
     system "sudo chmod 666 #{conf_file}"
@@ -152,6 +162,14 @@ class WpProjectInstaller
   # = MySQL =
   # =========
 
+  def pick_db_name (default)
+    puts "Välj namn på databasen.  Namnet får innehålla a-z, 0-9 och understreck"
+    print "Namn [#{default}]: "
+    name = $stdin.gets.strip
+    name = default if name.empty?
+    name
+  end
+  
   def mysql_databases (mysql)
     pipe = IO.popen mysql, "r+"
     pipe.puts "show databases"
@@ -172,13 +190,13 @@ class WpProjectInstaller
     "mysql -uroot#{root_pass}"
   end
 
-  def create_database (mysql, db_name, db_user)
+  def create_database (mysql, db_name)
     charset = "utf8"
     IO.popen mysql, "w" do |pipe|
       # create database foo default character set utf8 default collate utf8_swedish_ci;
       pipe.puts "create database #{db_name} default character set #{charset} default collate #{charset}_swedish_ci;"
       # grant all on foo.* to foo@'localhost' identified by '';
-      pipe.puts "grant all on #{db_name}.* to #{db_user}@'localhost' identified by '';"
+      pipe.puts "grant all on #{db_name}.* to #{db_name}@'localhost' identified by '';"
     end
   end
 end
