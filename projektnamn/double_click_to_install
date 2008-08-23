@@ -1,0 +1,11 @@
+#! /usr/bin/ruby
+
+require 'fileutils'
+
+File.cd File.dirname(__FILE__)
+
+if File.directory?(".git")
+  puts "Du har redan installerat det här WP-projektet"
+  exit
+end
+
