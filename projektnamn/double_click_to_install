@@ -12,6 +12,7 @@ class WpProjectInstaller
   end
   
   def install
+    system "clear"
     directory = File.dirname(__FILE__)
     FileUtils.cd directory
 
@@ -58,8 +59,8 @@ class WpProjectInstaller
     end
 
     # if OK
-    # apache "#{virtual}.#{hostname}", File.join(FileUtils.pwd, "wordpress")
-    # create_database mysql, db
+    apache "#{virtual}.#{hostname}", File.join(FileUtils.pwd, "wordpress")
+    create_database mysql, db
 
     File.open("wordpress/wp-config.php", "w") { |f| write_wp_config(f, db, db, 'Localhost') }
     File.open("config/wp-config.php", "w")    { |f| write_wp_config(f, 'db_name', 'db_user', 'db_host') }
@@ -127,13 +128,13 @@ class WpProjectInstaller
   end
   
   def add_apache_vhost (vhost, path)
-    conf_file = "/etc/apache2/users/#{USERNAME}.conf"
+    conf_file = "/etc/apache2/users/#{username}.conf"
     system "sudo chmod 666 #{conf_file}"
     File.open conf_file, "a" do |f|
       str = <<-EOT
 
       <VirtualHost *:80 *:8000>
-          ServerAdmin webmaster.#{vhost.sub(/\..+/,'')}@#{HOSTNAME}
+          ServerAdmin webmaster.#{vhost.sub(/\..+/,'')}@#{hostname}
           DocumentRoot #{path}
           ServerAlias #{vhost}
       </VirtualHost>
@@ -154,8 +155,11 @@ class WpProjectInstaller
 
   def apache (vhost, path)
     add_apache_vhost vhost, path
+    puts "Lagt till #{vhost} -> #{path} i Apache."
     add_hosts_entry  vhost
+    puts "Lagt till #{vhost} i hosts-filen."
     system "sudo apachectl -k graceful"
+    puts "Sagt till Apache att läsa om sina inställningar."
   end
 
   # =========
@@ -198,6 +202,7 @@ class WpProjectInstaller
       # grant all on foo.* to foo@'localhost' identified by '';
       pipe.puts "grant all on #{db_name}.* to #{db_name}@'localhost' identified by '';"
     end
+    puts "Skapat databasen #{db_name}."
   end
 end
 
