@@ -210,4 +210,8 @@ end
 # = Run main when double-clicked =
 # ================================
 
-WpProjectInstaller.new.install if $0 == __FILE__
+if $0 == __FILE__
+  WpProjectInstaller.new.install
+  print "Tryck retur för att stänga fönstret: "
+  $stdin.gets
+end
