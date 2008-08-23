@@ -53,6 +53,7 @@ class WpProjectInstaller
     mysql = get_mysql_command
     existing_databases = mysql_databases(mysql)
     puts existing_databases.join(",")
+    puts "hej"
     exit
     # if OK
     # apache vhost, File.join(directory, "wordpress")
