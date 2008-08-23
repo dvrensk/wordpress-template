@@ -5,12 +5,12 @@ set :repository,  "git@martiniq.vrensk.com:repos/informo/#{application}.git"
 # fs-data :-)
 set :home, "/home/#{user[0,1]}/#{user}"
 
-set :scm, "git"
 set :scm_command, "#{home}/bin/git"
-set :local_scm_command, :default
 
 # Inget att ändra efter den här raden.
 
+set :scm, "git"
+set :local_scm_command, :default
 set :scm_verbose, true # eftersom git-reset inte tar -q i den här versionen...
 set :branch, "master"
 set :deploy_via, :remote_cache
@@ -37,12 +37,21 @@ namespace :deploy do
     run <<-CMD
       rm -rf #{latest_release}/wordpress/wp-config.php \
       #{latest_release}/wordpress/.htaccess \
-      #{latest_release}/wordpress/wp-content/uploads &&
-      cp #{shared_path}/system/wp-config.php #{latest_release}/wordpress &&
-      cp #{shared_path}/system/dot_htaccess #{latest_release}/wordpress/.htaccess &&
+      #{latest_release}/wordpress/wp-content/uploads \
+      #{latest_release}/.git &&
       ln -s #{shared_path}/uploads #{latest_release}/wordpress/wp-content &&
-      chmod -R u-w #{latest_release}/wordpress/wp-content/themes/nos2008
+      chmod -R u-w #{latest_release}/wordpress/wp-content/themes
     CMD
+
+    # Prefer files from the repo but use files in system/ otherwise
+    [%w(wp-config.php wp-config.php), %w(dot_htaccess .htaccess)].each do |(source, target)|
+      if File.exists?(File.join(File.dirname(__FILE__), source))
+        dir = "#{latest_release}/config"
+      else
+        dir = "#{shared_path}/system"
+      end
+      run "cp #{dir}/#{source} #{latest_release}/wordpress/#{target}"
+    end
 
     if fetch(:normalize_asset_timestamps, true)
       stamp = Time.now.utc.strftime("%Y%m%d%H%M.%S")
@@ -68,8 +77,6 @@ namespace :deploy do
   after 'deploy:setup', 'deploy:warn_about_known_hosts'
 end
 
-# Plockat från http://www.madebymany.co.uk/using-capistrano-with-php-specifically-wordpress-0087
-# och http://www.whomwah.com/2006/05/21/deploying-wordpress-using-capistrano/
 namespace :wordpress do
   task :setup do
     run "touch #{shared_path}/system/dot_htaccess"
