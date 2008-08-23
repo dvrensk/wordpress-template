@@ -52,8 +52,11 @@ class WpProjectInstaller
 
     mysql = get_mysql_command
     existing_databases = mysql_databases(mysql)
+    if existing_databases.empty?
+      puts "Kan inte prata med MySQL"
+      return false
+    end
     puts existing_databases.join(",")
-    puts "hej"
     exit
     # if OK
     # apache vhost, File.join(directory, "wordpress")
