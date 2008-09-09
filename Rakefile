@@ -1,7 +1,7 @@
 
 task :default do
   FileUtils.mkdir_p "build"
-  system "git archive --format=zip --prefix=projektnamn/ HEAD:projektnamn/ > build/nytt_wp_projekt.zip"
+  system "git archive --format=zip --prefix=projektnamn/ HEAD:projektnamn/ > build/nytt_wp-projekt.zip"
 end
 
 task :clean do
