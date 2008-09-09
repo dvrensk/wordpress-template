@@ -5,7 +5,7 @@ set :repository,  "git@martiniq.vrensk.com:repos/informo/#{application}.git"
 # fs-data :-)
 set :home, "/home/#{user[0,1]}/#{user}"
 
-set :scm_command, "#{home}/bin/git"
+# set :scm_command, "#{home}/bin/git"
 
 # Inget att ändra efter den här raden.
 
