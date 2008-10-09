@@ -4,45 +4,111 @@ require 'fileutils'
 require 'pathname'
 
 class WpProjectInstaller
-  attr_accessor :hostname, :username
-  
+  attr_accessor :hostname, :username, :db_config
+
   def initialize
     self.hostname = `hostname`.chomp
     self.username = `whoami`.chomp
   end
   
-  def install
+  def double_click
     system "clear"
     directory = File.dirname(__FILE__)
     FileUtils.cd directory
 
-    if File.directory?(".git")
-      puts "Du har redan installerat det här WP-projektet"
-      return false
+    return false unless is_proper_location?(FileUtils.pwd)
+    if not installed?
+      install
+    else
+      case select_action
+      when :dump
+        dump_mysql(get_apache_vhost_for_path(wordpress_path))
+        dump_uploads
+      when :load
+        load_mysql(get_apache_vhost_for_path(wordpress_path))
+        unzip_uploads
+      when :deploy
+        system "cap deploy"
+      when :open
+        system "open http://#{get_apache_vhost_for_path(wordpress_path)}/"
+      else
+        puts "OK, då gör vi ingenting."
+      end
     end
+  end
 
+  def select_action
+    puts <<-EOT
+
+Välj vad du vill göra:
+1. Publicera koden. Se till att du har gjort Fjärr > Sänd först.
+2. Förbereda datakopia till kollega.
+3. Ladda datakopia från kollega.
+4. Öppna i webbläsare.
+0. Ingenting.
+Skriv en siffra och tryck retur:
+    EOT
+    pick = $stdin.gets.to_i
+    return {1 => :deploy, 2 => :dump, 3 => :load, 4 => :open}[pick]
+  end
+
+  def is_proper_location? (directory)
     if directory.include?(' ')
-      puts "Kan inte installera projektet, för sökvägen innehåller mellanslag:"
+      puts "Kan inte installera projektet eftersom sökvägen innehåller mellanslag:"
       puts directory
       puts directory.tr(' ','^').tr('^^',' ')
       return false
     end
 
-    dirname = File.basename(FileUtils.pwd)
+    dirname = File.basename(directory)
     if dirname == "projektnamn"
       puts "Byt namn på den här katalogen till vad du vill att projektet ska heta"
       puts "och försök sedan installera igen."
       return false
     end
+    return true
+  end
 
+  def installed?
+    score = 0
+    if vhost = get_apache_vhost_for_path(wordpress_path)
+      score += 1
+      puts "Apache servar projektet på http://#{vhost}/"
+      lines =  `grep #{vhost} /etc/hosts`
+      unless lines.empty?
+        score += 1
+        puts "/etc/hosts känner till #{vhost}:"
+        puts lines
+      end
+    end
+    if File.exists?(File.join(wordpress_path, "wp-config.php"))
+      score += 1
+      puts "Hittade wp-config.php."
+      system "mysql #{mysql_connect_string} < /dev/null"
+      if $? == 0
+        score += 1
+        puts "Kunde tala med databasen."
+      end
+    end
+    
+    case score
+    when 0 then return false
+    when 4 then return true
+    else
+      puts "KONSTIGT! Det verkar som om det här projektet är halvinstallerat."
+      return false
+    end
+  end
+  
+  def install
     virtual = pick_virtual_name(File.basename(FileUtils.pwd).downcase.gsub(/[^-a-z0-9]/,''))
     unless virtual =~ /^[a-z][-a-z0-9]+$/
       puts "hostnamnet '#{virtual}' innehåller konstiga tecken"
       return false
     end
 
-    db = pick_db_name(virtual.tr('-','_'))
-    unless db =~ /^[a-z][_a-z0-9]+$/
+    db_name = pick_db_name(virtual.tr('-','_'))
+    unless db_name =~ /^[a-z][_a-z0-9]+$/
       puts "databasnamnet '#{db}' innehåller konstiga tecken"
       return false
     end
@@ -53,23 +119,32 @@ class WpProjectInstaller
       puts "Kan inte prata med MySQL"
       return false
     end
-    if existing_databases.include?(db)
-      puts "Det finns redan en databas med namnet '#{db}'!"
-      return false
-    end
 
     # if OK
-    puts "Ange ditt vanliga lösenord på den här datorn för att uppdatera systemfiler:"
-    apache "#{virtual}.#{hostname}", File.join(FileUtils.pwd, "wordpress")
-    create_database mysql, db
+    if existing_databases.include?(db_name)
+      puts "Det finns redan en databas med namnet '#{db_name}'!"
+    else
+      create_database mysql, db_name
+      File.open("wordpress/wp-config.php", "w") { |f| write_wp_config(f, db_name, db_name, 'Localhost') }
+    end
 
-    File.open("wordpress/wp-config.php", "w") { |f| write_wp_config(f, db, db, 'Localhost') }
-    File.open("config/wp-config.php", "w")    { |f| write_wp_config(f, 'db_name', 'db_user', 'db_host') }
+    unless get_apache_vhost_for_path(wordpress_path)
+      puts "Ange ditt vanliga lösenord på den här datorn för att uppdatera systemfiler:"
+      apache "#{virtual}.#{hostname}", wordpress_path
+    end
 
-    FileUtils.mkdir "wordpress/wp-content/uploads", :mode => 0777
-    FileUtils.cp "config/dot_htaccess", "wordpress/.htaccess"
+    unless File.exists?("config/wp-config.php")
+      File.open("config/wp-config.php", "w")    { |f| write_wp_config(f, 'db_name', 'db_user', 'db_host') }
+    end
 
-    system "git init; git add .; git commit -q -m Initial"
+    mkdir_p_uploads
+    unless File.exists?("wordpress/.htaccess")
+      FileUtils.cp "config/dot_htaccess", "wordpress/.htaccess"
+    end
+
+    unless File.directory?(".git")
+      system "git init; git add .; git commit -q -m Initial"
+    end
     
     puts ""
     puts "Du är nu klar med inställningarna.  Installera WP genom att öppna"
@@ -82,11 +157,15 @@ class WpProjectInstaller
   # = WP-config =
   # =============
 
+  def wordpress_path
+    File.join(FileUtils.pwd, "wordpress")
+  end
+  
   def write_wp_config (file, db_name, db_user, db_host)
     keys = (1..3).map do |n|
       rand(345678765434567876545678765434567873567897545909644587456876456887345876534587645987345679873568).to_s(36)
     end
-    file.puts <<-EOT.gsub(/^\s+/,'')
+    file.puts <<-EOT.gsub(/^ {4}/,'')
     <?php
     // ** MySQL settings ** //
     define('DB_NAME',     '#{db_name}');    // The name of the database
@@ -143,7 +222,7 @@ class WpProjectInstaller
 <VirtualHost *:80 *:8000>
     ServerAdmin webmaster.#{vhost.sub(/\..+/,'')}@#{hostname}
     DocumentRoot #{path}
-    ServerAlias #{vhost}
+    ServerName #{vhost}
 </VirtualHost>
       EOT
       f.puts str
@@ -151,6 +230,23 @@ class WpProjectInstaller
     system "sudo chmod 644 #{conf_file}"
   end
 
+  def get_apache_vhost_for_path (path)
+    conf_file = "/etc/apache2/users/#{username}.conf"
+    vhosts = File.new(conf_file).read.split "<VirtualHost"
+    vhosts.shift # drop preamble
+    vhosts = vhosts.map { |vhost| vhost.split("</VirtualHost").first }
+    
+    if vhost = vhosts.detect { |e| e.match(path) }
+      if vhost.match(/^\s*ServerName\s+(.+)/)
+        return $1
+      elsif vhost.match(/^\s*ServerAlias\s+(.+)/)
+        return $1
+      else
+        raise "Hittade en VirtualHost-deklaration för #{path} men kunde inte hitta servernamnet."
+      end
+    end
+  end
+  
   def add_hosts_entry (vhost)
     hosts_file = "/etc/hosts"
     system "sudo chmod 666 #{hosts_file}"
@@ -201,6 +297,49 @@ class WpProjectInstaller
     "mysql -uroot#{root_pass}"
   end
 
+  def mysql_connect_string
+    if db_config.nil?
+      self.db_config = {}
+      lines = File.new(File.join(File.dirname(__FILE__),"wordpress/wp-config.php")).read
+      hunt_keys = {:host => 'DB_HOST', :user => 'DB_USER', :password => 'DB_PASSWORD', :database => 'DB_NAME'}
+      hunt_keys.each do |(key, value)|
+        if m = lines.match(/define\(['"]#{value}['"],\s*['"](.*)['"]\)/)
+          db_config[key] = m[1]
+        else
+          raise "no match for #{value}"
+        end
+      end
+    end
+    "-u #{db_config[:user]}#{db_config[:password].empty? ? "" : " -p"+db_config[:password]} -h #{db_config[:host]} #{db_config[:database]}"
+  end
+
+  def dump_mysql (host_name)
+    puts "Dumpar databasen till dbdump.sql.gz"
+    dump_file = File.join(File.dirname(__FILE__), "dbdump.sql")
+    table_names = `mysql -e "show tables" #{mysql_connect_string}`.split(/\r?\n/)[1..-1].reject { |t| t == "wp_posts" }
+    system "mysqldump --quick #{mysql_connect_string} #{table_names.join(" ")} > #{dump_file}"
+    File.open(dump_file, "a") do |out|
+      out.write(`mysqldump --quick #{mysql_connect_string} wp_posts`.gsub(host_name, "YOURxHOSTxNAMExHERE"))
+    end
+    
+    system "gzip -f '#{dump_file}'"
+  end
+
+  def load_mysql (host_name)
+    puts "Laddar databasdump"
+    dump_file = File.join(FileUtils.pwd, "dbdump.sql.gz")
+    unless File.exists?(dump_file)
+      puts "Dumpfilen saknas.  Den ska heta 'dbdump.sql.gz' och ligga i katalogen"
+      puts "#{FileUtils.pwd}"
+      return false
+    end
+    sql = `gzcat #{dump_file}`.gsub("YOURxHOSTxNAMExHERE", host_name)
+    IO.popen("mysql #{mysql_connect_string}", "w+") do |io|
+      io.write(sql)
+      io.write("UPDATE wp_options SET option_value = 'http://#{host_name}/' WHERE option_name IN ('siteurl','home');")
+    end
+  end
+  
   def create_database (mysql, db_name)
     charset = "utf8"
     IO.popen mysql, "w" do |pipe|
@@ -213,13 +352,45 @@ class WpProjectInstaller
   end
 end
 
+# ===========
+# = Uploads =
+# ===========
+
+def mkdir_p_uploads
+  FileUtils.mkdir_p "wordpress/wp-content/uploads", :mode => 0777
+end
+
+def dump_uploads
+  puts "Dumpar uploads-katalogen till uploads.zip."
+  dump_file = File.join(FileUtils.pwd, "uploads.zip")
+  FileUtils.rm(dump_file) if File.exists?(dump_file)
+  FileUtils.chdir "wordpress/wp-content/uploads" do
+    system "zip -r    -q #{dump_file} *"
+    system "zip -r -d -q #{dump_file} js_cache"
+  end
+end
+
+def unzip_uploads
+  puts "Packar upp zip-filen."
+  dump_file = File.join(FileUtils.pwd, "uploads.zip")
+  unless File.exists?(dump_file)
+    puts "Zip-filen saknas.  Den ska heta 'uploads.zip' och ligga i katalogen"
+    puts "#{FileUtils.pwd}"
+    return false
+  end
+  mkdir_p_uploads
+  FileUtils.chdir "wordpress/wp-content/uploads" do
+    system "unzip -q #{dump_file}"
+  end
+end
+
 # ================================
 # = Run main when double-clicked =
 # ================================
 
 if $0 == __FILE__
-  WpProjectInstaller.new.install
+  WpProjectInstaller.new.double_click
   puts ""
-  print "Tryck retur för att stänga fönstret. "
-  $stdin.gets
+  # print "Tryck retur för att stänga fönstret. "
+  # $stdin.gets
 end

@@ -1,2 +1,5 @@
 wordpress/wp-content/uploads
-/.htaccess
+.htaccess
+wordpress/wp-config.php
+uploads.zip
+dbdump.sql.gz
